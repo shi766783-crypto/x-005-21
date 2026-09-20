@@ -1,0 +1,75 @@
+/* 全局基础样式：仅保留应用级排版与通用工具类，页面/组件样式内聚到各自 SFC */
+
+:root {
+  --brand: #409eff;
+  --page-bg: #f5f7fa;
+  --card-bg: #ffffff;
+  --border: #e4e7ed;
+  --text: #303133;
+  --text-secondary: #909399;
+  --danger: #f56c6c;
+  --warning: #e6a23c;
+  --success: #67c23a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', Arial, sans-serif;
+  color: var(--text);
+  background: var(--page-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* 通用页面容器 */
+.page {
+  padding: 20px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* 卡片 */
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+/* 缺口高亮：待采购/待借用清单中缺少数量的醒目样式 */
+.gap-missing {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--text-secondary);
+}
