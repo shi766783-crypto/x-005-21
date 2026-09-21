@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import type {
@@ -51,6 +51,12 @@ const form = reactive({
 
 const toolRows = ref<ToolRow[]>([])
 const materialRows = ref<MaterialRow[]>([])
+const predecessorIds = ref<string[]>([])
+
+/** 可被选为前置的项目：编辑时排除自身（自身不能作为自己的前置） */
+const predecessorOptions = computed(() =>
+  projectStore.projects.value.filter((p) => p.id !== props.project?.id),
+)
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
@@ -80,6 +86,7 @@ function reset(project: Project | null) {
     unit: m.unit,
     requiredQty: m.requiredQty,
   }))
+  predecessorIds.value = project?.predecessorIds ? [...project.predecessorIds] : []
 }
 
 watch(
@@ -121,6 +128,15 @@ function onMaterialSelect(row: MaterialRow, materialId: string) {
   row.unit = material?.unit ?? '个'
 }
 
+/** 实时校验：新增的前置若会造成循环依赖，立即撤销并提示 */
+function onPredecessorsChange(ids: string[]) {
+  const { validIds, rejected } = projectStore.validatePredecessors(props.project?.id, ids)
+  if (rejected.length) {
+    predecessorIds.value = validIds
+    ElMessage.warning(`不能选择「${rejected.map((p) => p.name).join('、')}」作为前置：会造成循环依赖`)
+  }
+}
+
 /** 校验需求清单行是否完整 */
 function validToolRow(row: ToolRow): boolean {
   return row.source === 'library' ? !!row.toolId : !!row.name.trim()
@@ -140,6 +156,13 @@ async function submit() {
   if (toolRows.value.some((r) => !validToolRow(r)) || materialRows.value.some((r) => !validMaterialRow(r))) {
     ElMessage.warning('请完善需求清单（选择工具/材料或填写名称）')
     return
+  }
+
+  // 校验前置依赖：过滤自身、悬挂引用与循环依赖
+  const { validIds, rejected } = projectStore.validatePredecessors(props.project?.id, predecessorIds.value)
+  predecessorIds.value = validIds
+  if (rejected.length) {
+    ElMessage.warning(`已自动移除会造成循环依赖的前置：${rejected.map((p) => p.name).join('、')}`)
   }
 
   const tools: ProjectToolItem[] = toolRows.value.map((r) => ({
@@ -164,6 +187,7 @@ async function submit() {
       estimatedHours: toNumber(form.estimatedHours),
       tools,
       materials,
+      predecessorIds: validIds,
     })
   } else {
     projectStore.addProject({
@@ -171,6 +195,7 @@ async function submit() {
       estimatedHours: toNumber(form.estimatedHours),
       tools,
       materials,
+      predecessorIds: validIds,
       status: '规划中',
     })
   }
@@ -208,6 +233,28 @@ async function submit() {
         <el-radio-group v-model="form.difficulty">
           <el-radio-button v-for="d in DIFFICULTIES" :key="d" :value="d">{{ d }}</el-radio-button>
         </el-radio-group>
+      </el-form-item>
+      <el-form-item label="前置项目">
+        <el-select
+          v-model="predecessorIds"
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          placeholder="选择需要先完成的项目，如先做柜子再装门"
+          style="width: 100%"
+          @change="onPredecessorsChange"
+        >
+          <el-option
+            v-for="p in predecessorOptions"
+            :key="p.id"
+            :label="`${p.name}（${p.status}）`"
+            :value="p.id"
+          />
+        </el-select>
+        <div class="predecessor-hint">
+          所选项目全部完成后，才建议开工本项目；会造成循环依赖的选择将被自动阻止。
+        </div>
       </el-form-item>
 
       <el-divider content-position="left">所需工具</el-divider>
@@ -294,5 +341,11 @@ async function submit() {
 }
 .item-select {
   width: 220px;
+}
+.predecessor-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  line-height: 1.5;
+  margin-top: 4px;
 }
 </style>

@@ -68,6 +68,14 @@ export interface ProjectFeedback {
   materialWaste: boolean | null // 材料是否浪费
 }
 
+/** 单个前置项目的当前状态，用于依赖检查与提醒 */
+export interface PredecessorState {
+  id: string
+  name: string
+  status: ProjectStatus
+  done: boolean // 是否已完成（只有「已完成」才算前置达成）
+}
+
 export interface Project {
   id: string
   name: string
@@ -77,6 +85,7 @@ export interface Project {
   difficulty: Difficulty
   tools: ProjectToolItem[]
   materials: ProjectMaterialItem[]
+  predecessorIds: string[] // 前置项目 id：前置项目全部完成后才建议开工
   status: ProjectStatus
   actualHours?: number // 实际用时
   actualCost?: number // 实际花费

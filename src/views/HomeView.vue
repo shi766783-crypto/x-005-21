@@ -3,6 +3,8 @@ import { useRouter } from 'vue-router'
 import { useDashboard } from '../composables/useDashboard'
 import { useToolStore } from '../stores/useToolStore'
 import { useBorrowStore } from '../stores/useBorrowStore'
+import { useProjectStore } from '../stores/useProjectStore'
+import { STATUS_TAG } from '../types'
 import StatCard from '../components/StatCard.vue'
 import { today, isOverdue } from '../utils/format'
 
@@ -10,6 +12,7 @@ const router = useRouter()
 const { stats, unreturnedBorrows, lowStockMaterials } = useDashboard()
 const toolStore = useToolStore()
 const borrowStore = useBorrowStore()
+const projectStore = useProjectStore()
 
 function toolName(id: string): string {
   return toolStore.getTool(id)?.name ?? '未知工具'
@@ -82,6 +85,55 @@ function goReturn(recordId: string) {
         <el-empty v-else description="暂无预警材料" :image-size="60" />
       </section>
     </div>
+
+    <section class="card" style="margin-bottom: 16px">
+      <div class="section-head">
+        <span class="section-title">前置依赖提醒</span>
+        <el-tag v-if="projectStore.blockedProjects.value.length" type="warning">
+          {{ projectStore.blockedProjects.value.length }} 个项目在等待前置完成
+        </el-tag>
+        <el-tag v-else type="success">无阻塞</el-tag>
+      </div>
+      <el-table
+        v-if="projectStore.blockedProjects.value.length"
+        :data="projectStore.blockedProjects.value"
+        size="small"
+        border
+      >
+        <el-table-column label="项目" min-width="140">
+          <template #default="{ row }">
+            <el-link
+              type="primary"
+              :underline="false"
+              @click="router.push({ name: 'project-detail', params: { id: row.project.id } })"
+            >
+              {{ row.project.name }}
+            </el-link>
+          </template>
+        </el-table-column>
+        <el-table-column label="等待完成的前置项目" min-width="220">
+          <template #default="{ row }">
+            <el-tag
+              v-for="b in row.blockers"
+              :key="b.id"
+              :type="b.status === '已搁置' ? 'warning' : 'info'"
+              size="small"
+              style="margin: 2px 4px 2px 0"
+            >
+              {{ b.name }}（{{ b.status }}）
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="当前状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="STATUS_TAG[row.project.status as keyof typeof STATUS_TAG]" size="small">
+              {{ row.project.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="没有等待前置完成的项目" :image-size="60" />
+    </section>
 
     <section class="card quick-actions">
       <span class="section-title">快速入口</span>

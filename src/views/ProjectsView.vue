@@ -40,9 +40,26 @@ function openEdit(p: Project) {
   dialogVisible.value = true
 }
 async function remove(p: Project) {
-  await ElMessageBox.confirm(`确定删除项目「${p.name}」吗？`, '提示', { type: 'warning' })
+  // 前置项目被删除：提醒用户确认依赖关系，列出受影响的下游项目
+  const dependents = projectStore.dependentsOf(p.id)
+  if (dependents.length) {
+    await ElMessageBox.confirm(
+      `项目「${p.name}」被以下 ${dependents.length} 个项目设为前置，删除后将自动解除这些依赖关系：\n\n` +
+        dependents.map((d) => `· ${d.name}`).join('\n') +
+        '\n\n确定删除吗？',
+      '删除前置项目需确认',
+      { type: 'warning', confirmButtonText: '仍要删除', cancelButtonText: '取消' },
+    )
+  } else {
+    await ElMessageBox.confirm(`确定删除项目「${p.name}」吗？`, '提示', { type: 'warning' })
+  }
   projectStore.removeProject(p.id)
-  ElMessage.success('已删除')
+  ElMessage.success(dependents.length ? '已删除，并解除相关前置依赖' : '已删除')
+}
+
+/** 前置项目状态标签 */
+function predecessorState(p: Project): { name: string; status: Project['status'] }[] {
+  return projectStore.predecessorStates(p).map((s) => ({ name: s.name, status: s.status }))
 }
 </script>
 
@@ -86,6 +103,29 @@ async function remove(p: Project) {
             <span v-else style="color: var(--success)">充足</span>
           </template>
         </el-table-column>
+        <el-table-column label="前置项目" min-width="180">
+          <template #default="{ row }">
+            <template v-if="predecessorState(row).length">
+              <el-tag
+                v-for="pre in predecessorState(row)"
+                :key="pre.name"
+                :type="pre.status === '已完成' ? 'success' : pre.status === '已搁置' ? 'warning' : 'info'"
+                size="small"
+                class="pre-tag"
+              >
+                {{ pre.name }}
+              </el-tag>
+              <el-tooltip
+                v-if="projectStore.hasUnfinishedPredecessor(row) && row.status !== '已搁置'"
+                content="前置项目尚未全部完成，暂不建议开工"
+                placement="top"
+              >
+                <el-icon class="blocked-icon"><WarningFilled /></el-icon>
+              </el-tooltip>
+            </template>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="预计工时" width="90" align="center">
           <template #default="{ row }">{{ row.estimatedHours }}h</template>
         </el-table-column>
@@ -111,5 +151,13 @@ async function remove(p: Project) {
   gap: 12px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+}
+.pre-tag {
+  margin: 2px 4px 2px 0;
+}
+.blocked-icon {
+  color: var(--warning, #e6a23c);
+  vertical-align: middle;
+  margin-left: 2px;
 }
 </style>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import type { ProjectStatus } from '../types'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type { ProjectStatus, PredecessorState } from '../types'
 import { PROJECT_STATUSES, DIFFICULTY_TAG, STATUS_TAG } from '../types'
 import { useProjectStore } from '../stores/useProjectStore'
 import GapPanel from '../components/GapPanel.vue'
@@ -15,6 +15,13 @@ const projectStore = useProjectStore()
 
 const project = computed(() => projectStore.getProject(route.params.id as string))
 const gap = computed(() => (project.value ? projectStore.computeGap(project.value) : null))
+
+/** 前置项目状态明细 */
+const predecessors = computed<PredecessorState[]>(() =>
+  project.value ? projectStore.predecessorStates(project.value) : [],
+)
+const unfinished = computed(() => predecessors.value.filter((s) => !s.done))
+const blocked = computed(() => project.value && project.value.status !== '已搁置' && unfinished.value.length > 0)
 
 const form = reactive({
   actualHours: undefined as number | undefined,
@@ -43,9 +50,51 @@ function syncForm() {
 
 watch(project, syncForm, { immediate: true })
 
-function changeStatus(status: ProjectStatus) {
+/**
+ * 切换项目状态：
+ * - 开始进行：前置未全部完成时提示并要求确认（允许强制开工）
+ * - 改为搁置：存在依赖本项目的下游项目时，提醒用户确认影响
+ */
+async function changeStatus(status: ProjectStatus) {
   if (!project.value) return
-  projectStore.updateProject(project.value.id, { status })
+  const current = project.value
+
+  if (status === '进行中' || status === '已完成') {
+    const blockers = projectStore.unfinishedPredecessors(current)
+    if (blockers.length) {
+      const action = status === '已完成' ? '标记完成' : '开始'
+      try {
+        await ElMessageBox.confirm(
+          `以下前置项目还未完成，按计划应先完成它们再${action}本项目：\n\n` +
+            blockers.map((b) => `· ${b.name}（${b.status}）`).join('\n') +
+            `\n\n是否仍要强制${action}？`,
+          '前置项目尚未完成',
+          { type: 'warning', confirmButtonText: `仍要${action}`, cancelButtonText: '先不操作' },
+        )
+      } catch {
+        return // 用户取消，保持原状态
+      }
+    }
+  }
+
+  if (status === '已搁置' && current.status !== '已搁置') {
+    const dependents = projectStore.dependentsOf(current.id)
+    if (dependents.length) {
+      try {
+        await ElMessageBox.confirm(
+          `本项目被以下 ${dependents.length} 个项目设为前置，搁置后它们将因前置未完成而无法正常开工：\n\n` +
+            dependents.map((d) => `· ${d.name}`).join('\n') +
+            '\n\n确定搁置吗？',
+          '搁置前置项目需确认',
+          { type: 'warning', confirmButtonText: '仍要搁置', cancelButtonText: '取消' },
+        )
+      } catch {
+        return
+      }
+    }
+  }
+
+  projectStore.updateProject(current.id, { status })
   ElMessage.success(`项目状态已更新为「${status}」`)
 }
 
@@ -91,6 +140,54 @@ function saveRecord() {
         </el-radio-group>
       </div>
     </div>
+
+    <el-alert
+      v-if="blocked"
+      class="blocked-alert"
+      type="warning"
+      show-icon
+      :closable="false"
+      title="前置项目尚未全部完成，暂不建议开工"
+    >
+      <template #default>
+        <div v-for="b in unfinished" :key="b.id" class="blocked-line">
+          · {{ b.name }}（当前状态：{{ b.status }}）
+        </div>
+      </template>
+    </el-alert>
+
+    <section v-if="predecessors.length" class="card" style="margin-bottom: 16px">
+      <div class="section-title">
+        前置项目
+        <el-tag size="small" :type="blocked ? 'warning' : 'success'" style="margin-left: 8px">
+          {{ blocked ? `${unfinished.length} 项未完成` : '已全部完成' }}
+        </el-tag>
+      </div>
+      <el-table :data="predecessors" size="small" border>
+        <el-table-column label="项目名称" min-width="150">
+          <template #default="{ row }">
+            <el-link
+              type="primary"
+              :underline="false"
+              @click="router.push({ name: 'project-detail', params: { id: row.id } })"
+            >
+              {{ row.name }}
+            </el-link>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag :type="STATUS_TAG[row.status as keyof typeof STATUS_TAG]" size="small">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="是否完成" width="100" align="center">
+          <template #default="{ row }">
+            <el-icon v-if="row.done" color="var(--success)"><CircleCheckFilled /></el-icon>
+            <span v-else class="gap-missing">未完成</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </section>
 
     <div class="info-grid">
       <div class="card">
@@ -203,5 +300,11 @@ function saveRecord() {
   display: flex;
   gap: 32px;
   flex-wrap: wrap;
+}
+.blocked-alert {
+  margin-bottom: 16px;
+}
+.blocked-line {
+  line-height: 1.8;
 }
 </style>
