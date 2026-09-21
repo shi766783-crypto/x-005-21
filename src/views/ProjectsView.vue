@@ -31,6 +31,13 @@ function gapCount(p: Project): number {
   return gap.tools.length + gap.materials.length
 }
 
+function depCount(p: Project): number {
+  return projectStore.getDependencies(p).length
+}
+function unmetDepCount(p: Project): number {
+  return projectStore.unmetDependencies(p).length
+}
+
 function openCreate() {
   editingProject.value = null
   dialogVisible.value = true
@@ -40,9 +47,13 @@ function openEdit(p: Project) {
   dialogVisible.value = true
 }
 async function remove(p: Project) {
-  await ElMessageBox.confirm(`确定删除项目「${p.name}」吗？`, '提示', { type: 'warning' })
+  const dependents = projectStore.dependentsOf(p.id)
+  const depNote = dependents.length
+    ? `。注意：${dependents.map((d) => `「${d.name}」`).join('、')} 将其设为前置项目，删除后这些前置关系将被移除`
+    : ''
+  await ElMessageBox.confirm(`确定删除项目「${p.name}」吗${depNote}？`, '提示', { type: 'warning' })
   projectStore.removeProject(p.id)
-  ElMessage.success('已删除')
+  ElMessage.success(dependents.length ? '已删除，并解除相关项目的前置依赖' : '已删除')
 }
 </script>
 
@@ -86,6 +97,19 @@ async function remove(p: Project) {
             <span v-else style="color: var(--success)">充足</span>
           </template>
         </el-table-column>
+        <el-table-column label="前置依赖" width="110" align="center">
+          <template #default="{ row }">
+            <span v-if="depCount(row) === 0" class="muted">无</span>
+            <el-tooltip
+              v-else-if="unmetDepCount(row) > 0"
+              :content="`还有 ${unmetDepCount(row)} 个前置项目未完成`"
+              placement="top"
+            >
+              <span class="dep-blocked">{{ depCount(row) }} 项前置 · 未就绪</span>
+            </el-tooltip>
+            <span v-else style="color: var(--success)">{{ depCount(row) }} 项前置 · 已就绪</span>
+          </template>
+        </el-table-column>
         <el-table-column label="预计工时" width="90" align="center">
           <template #default="{ row }">{{ row.estimatedHours }}h</template>
         </el-table-column>
@@ -111,5 +135,9 @@ async function remove(p: Project) {
   gap: 12px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+}
+.dep-blocked {
+  color: var(--warning);
+  cursor: default;
 }
 </style>

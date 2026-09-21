@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import type {
@@ -51,6 +51,15 @@ const form = reactive({
 
 const toolRows = ref<ToolRow[]>([])
 const materialRows = ref<MaterialRow[]>([])
+const dependencies = ref<string[]>([])
+
+/** 可作为前置的项目：排除自身；会与本项目形成循环依赖的禁选 */
+const depCandidates = computed(() =>
+  projectStore.projects.value.filter((p) => p.id !== props.project?.id),
+)
+function depDisabled(p: Project): boolean {
+  return props.project ? projectStore.wouldCreateCycle(props.project.id, [p.id]) : false
+}
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
@@ -80,6 +89,8 @@ function reset(project: Project | null) {
     unit: m.unit,
     requiredQty: m.requiredQty,
   }))
+  // 只保留仍然存在的项目，避免旧数据里已删除的前置残留
+  dependencies.value = (project?.dependencies ?? []).filter((id) => projectStore.getProject(id))
 }
 
 watch(
@@ -164,6 +175,7 @@ async function submit() {
       estimatedHours: toNumber(form.estimatedHours),
       tools,
       materials,
+      dependencies: [...dependencies.value],
     })
   } else {
     projectStore.addProject({
@@ -171,6 +183,7 @@ async function submit() {
       estimatedHours: toNumber(form.estimatedHours),
       tools,
       materials,
+      dependencies: [...dependencies.value],
       status: '规划中',
     })
   }
@@ -208,6 +221,28 @@ async function submit() {
         <el-radio-group v-model="form.difficulty">
           <el-radio-button v-for="d in DIFFICULTIES" :key="d" :value="d">{{ d }}</el-radio-button>
         </el-radio-group>
+      </el-form-item>
+      <el-form-item label="前置项目">
+        <el-select
+          v-model="dependencies"
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          placeholder="选择需要先完成的项目（可不选）"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="p in depCandidates"
+            :key="p.id"
+            :label="`${p.name}（${p.status}）`"
+            :value="p.id"
+            :disabled="depDisabled(p)"
+          />
+        </el-select>
+        <div class="muted" style="font-size: 12px; line-height: 1.6">
+          前置项目完成后本项目才适合开工；会形成循环依赖的项目不可选
+        </div>
       </el-form-item>
 
       <el-divider content-position="left">所需工具</el-divider>

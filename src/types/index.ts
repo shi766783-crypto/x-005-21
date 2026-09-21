@@ -77,6 +77,8 @@ export interface Project {
   difficulty: Difficulty
   tools: ProjectToolItem[]
   materials: ProjectMaterialItem[]
+  /** 前置项目 id 列表：前置完成后本项目才适合开工（可选，兼容旧数据） */
+  dependencies?: string[]
   status: ProjectStatus
   actualHours?: number // 实际用时
   actualCost?: number // 实际花费

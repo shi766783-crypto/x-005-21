@@ -57,10 +57,51 @@ export function useProjectStore() {
 
   function removeProject(id: string) {
     projects.value = projects.value.filter((p) => p.id !== id)
+    // 清理其他项目对被删项目的前置引用，避免留下悬空的依赖 id
+    for (const p of projects.value) {
+      if ((p.dependencies ?? []).includes(id)) {
+        p.dependencies = (p.dependencies ?? []).filter((d) => d !== id)
+        p.updatedAt = Date.now()
+      }
+    }
   }
 
   function getProject(id: string): Project | undefined {
     return projects.value.find((p) => p.id === id)
+  }
+
+  /** 项目的前置项目（已删除的前置引用会被忽略） */
+  function getDependencies(project: Project): Project[] {
+    return (project.dependencies ?? [])
+      .map((id) => getProject(id))
+      .filter((p): p is Project => !!p)
+  }
+
+  /** 尚未完成的前置项目（状态不是「已完成」即视为未就绪） */
+  function unmetDependencies(project: Project): Project[] {
+    return getDependencies(project).filter((p) => p.status !== '已完成')
+  }
+
+  /** 依赖指定项目的后续项目 */
+  function dependentsOf(projectId: string): Project[] {
+    return projects.value.filter((p) => (p.dependencies ?? []).includes(projectId))
+  }
+
+  /**
+   * 判断把 projectId 的前置设为 depIds 是否会形成循环依赖：
+   * 从每个候选前置沿依赖链向上走，若能回到 projectId 则成环。
+   */
+  function wouldCreateCycle(projectId: string, depIds: string[]): boolean {
+    const stack = [...depIds]
+    const seen = new Set<string>()
+    while (stack.length) {
+      const cur = stack.pop()!
+      if (cur === projectId) return true
+      if (seen.has(cur)) continue
+      seen.add(cur)
+      stack.push(...(getProject(cur)?.dependencies ?? []))
+    }
+    return false
   }
 
   /** 项目缺口分析（核心计算属性逻辑）：对比库存，生成待采购/待借用清单 */
@@ -129,6 +170,10 @@ export function useProjectStore() {
     updateProject,
     removeProject,
     getProject,
+    getDependencies,
+    unmetDependencies,
+    dependentsOf,
+    wouldCreateCycle,
     computeGap,
     completedProjects,
     inProgressProjects,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ProjectStatus } from '../types'
 import { PROJECT_STATUSES, DIFFICULTY_TAG, STATUS_TAG } from '../types'
 import { useProjectStore } from '../stores/useProjectStore'
@@ -15,6 +15,12 @@ const projectStore = useProjectStore()
 
 const project = computed(() => projectStore.getProject(route.params.id as string))
 const gap = computed(() => (project.value ? projectStore.computeGap(project.value) : null))
+
+/** 前置项目与未就绪前置 */
+const dependencies = computed(() => (project.value ? projectStore.getDependencies(project.value) : []))
+const unmetDeps = computed(() => (project.value ? projectStore.unmetDependencies(project.value) : []))
+/** 依赖本项目的后续项目 */
+const dependents = computed(() => (project.value ? projectStore.dependentsOf(project.value.id) : []))
 
 const form = reactive({
   actualHours: undefined as number | undefined,
@@ -43,9 +49,45 @@ function syncForm() {
 
 watch(project, syncForm, { immediate: true })
 
-function changeStatus(status: ProjectStatus) {
+async function changeStatus(status: ProjectStatus) {
   if (!project.value) return
-  projectStore.updateProject(project.value.id, { status })
+  const current = project.value
+
+  // 开工前置检查：有前置项目未完成时提示，由用户确认是否仍要开工
+  if (status === '进行中' && current.status !== '进行中') {
+    const unmet = projectStore.unmetDependencies(current)
+    if (unmet.length) {
+      try {
+        await ElMessageBox.confirm(
+          `前置项目 ${unmet.map((p) => `「${p.name}」`).join('、')} 尚未完成，确定要提前开工吗？`,
+          '前置项目未完成',
+          { type: 'warning', confirmButtonText: '仍然开工', cancelButtonText: '再等等' },
+        )
+      } catch {
+        return
+      }
+    }
+  }
+
+  // 搁置前提醒：仍有后续项目依赖本项目时，请用户确认依赖关系
+  if (status === '已搁置' && current.status !== '已搁置') {
+    const affected = projectStore
+      .dependentsOf(current.id)
+      .filter((p) => p.status === '规划中' || p.status === '进行中')
+    if (affected.length) {
+      try {
+        await ElMessageBox.confirm(
+          `${affected.map((p) => `「${p.name}」`).join('、')} 以本项目为前置，搁置后它们将一直无法就绪，确定搁置吗？`,
+          '有项目依赖本项目',
+          { type: 'warning', confirmButtonText: '仍然搁置', cancelButtonText: '取消' },
+        )
+      } catch {
+        return
+      }
+    }
+  }
+
+  projectStore.updateProject(current.id, { status })
   ElMessage.success(`项目状态已更新为「${status}」`)
 }
 
@@ -109,6 +151,46 @@ function saveRecord() {
         <p style="margin: 6px 0 0">{{ project.description || '（暂无描述）' }}</p>
       </div>
     </div>
+
+    <section v-if="dependencies.length || dependents.length" class="card" style="margin-bottom: 16px">
+      <div class="section-title">前置依赖</div>
+      <el-alert
+        v-if="unmetDeps.length && (project.status === '规划中' || project.status === '进行中')"
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="`有 ${unmetDeps.length} 个前置项目未完成，建议先完成：${unmetDeps.map((p) => p.name).join('、')}`"
+        style="margin-bottom: 12px"
+      />
+      <div v-if="dependencies.length" class="dep-row">
+        <span class="info-label">前置项目</span>
+        <div class="dep-list">
+          <span
+            v-for="d in dependencies"
+            :key="d.id"
+            class="dep-item"
+            @click="router.push({ name: 'project-detail', params: { id: d.id } })"
+          >
+            {{ d.name }}
+            <el-tag :type="STATUS_TAG[d.status]" size="small">{{ d.status }}</el-tag>
+          </span>
+        </div>
+      </div>
+      <div v-if="dependents.length" class="dep-row">
+        <span class="info-label">后续项目</span>
+        <div class="dep-list">
+          <span
+            v-for="d in dependents"
+            :key="d.id"
+            class="dep-item"
+            @click="router.push({ name: 'project-detail', params: { id: d.id } })"
+          >
+            {{ d.name }}
+            <el-tag :type="STATUS_TAG[d.status]" size="small">{{ d.status }}</el-tag>
+          </span>
+        </div>
+      </div>
+    </section>
 
     <section class="card" style="margin-bottom: 16px">
       <div class="section-title">库存缺口分析</div>
@@ -198,6 +280,31 @@ function saveRecord() {
   font-weight: 600;
   font-size: 15px;
   margin-bottom: 12px;
+}
+.dep-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.dep-row:last-child {
+  margin-bottom: 0;
+}
+.dep-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dep-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.dep-item:hover {
+  background: var(--el-fill-color-light);
 }
 .form-grid {
   display: flex;
